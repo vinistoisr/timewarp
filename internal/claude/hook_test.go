@@ -52,6 +52,14 @@ func TestRunHook_WritesRow(t *testing.T) {
 	}
 }
 
+func TestRunHook_AcceptsByteOrderMark(t *testing.T) {
+	dir := t.TempDir()
+	in := string([]byte{0xEF, 0xBB, 0xBF}) + `{"session_id":"s9","hook_event_name":"Stop"}`
+	if err := RunHook(strings.NewReader(in), dir); err != nil {
+		t.Fatalf("input with a UTF-8 BOM (Windows PowerShell pipes add one) failed: %v", err)
+	}
+}
+
 func TestRunHook_GarbageInput(t *testing.T) {
 	dir := t.TempDir()
 	if err := RunHook(strings.NewReader("not json"), dir); err == nil {

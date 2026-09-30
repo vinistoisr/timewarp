@@ -43,7 +43,7 @@ After setup, a small purple clock icon appears in your system tray — Timewarp 
 
 ### Install on a PC from the command line
 
-1. Build: `go build -o timewarp.exe .` (Go 1.24 or newer).
+1. Build: `go build -ldflags "-H=windowsgui" -o timewarp.exe .` (Go 1.24 or newer). The `-H=windowsgui` flag matters: without it every Claude Code hook call opens a console window.
 2. Install for your account (no administrator rights needed):
    `timewarp.exe -install -dbpath "C:\Users\<you>\OneDrive - <org>\Timewarp Db"`
    This creates the scheduled task `Timewarp-<username>`, which starts Timewarp at logon and restarts it within 5 minutes if it stops, and adds the Claude Code hooks to `%USERPROFILE%\.claude\settings.json` (a backup is saved as `settings.json.timewarp-bak`).

@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -75,7 +76,11 @@ func eventsFor(refs []Ref, base db.ClaudeEvent) []db.ClaudeEvent {
 // log; the caller always exits 0 so Claude is never blocked.
 func RunHook(r io.Reader, dbpath string) error {
 	var in HookInput
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
+	br := bufio.NewReader(r)
+	if b, err := br.Peek(3); err == nil && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
+		br.Discard(3) // UTF-8 byte order mark, added by Windows PowerShell pipes
+	}
+	if err := json.NewDecoder(br).Decode(&in); err != nil {
 		return fmt.Errorf("hook: decode stdin: %w", err)
 	}
 	if in.SessionID == "" {

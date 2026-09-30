@@ -307,6 +307,21 @@ func runExporter(ctx context.Context) {
 // tracker instance runs per login session. Returns false if another instance
 // already holds it. The handle is intentionally never closed — it must live
 // for the life of the process.
+// attachParentConsole routes stdout/stderr to the terminal that launched a
+// GUI-subsystem exe. Output that is already redirected (pipe or file) is left alone.
+func attachParentConsole() {
+	if h, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE); err == nil && h != 0 && h != windows.InvalidHandle {
+		return
+	}
+	const attachParentProcess = ^uintptr(0) // ATTACH_PARENT_PROCESS (DWORD -1)
+	if r, _, _ := windows.NewLazySystemDLL("kernel32.dll").NewProc("AttachConsole").Call(attachParentProcess); r == 0 {
+		return
+	}
+	if f, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0); err == nil {
+		os.Stdout, os.Stderr = f, f
+	}
+}
+
 func acquireSingleInstanceLock() bool {
 	name, _ := windows.UTF16PtrFromString("TimewarpTrackerSingleInstance")
 	handle, err := windows.CreateMutex(nil, false, name)
@@ -375,6 +390,12 @@ func main() {
 			logHookError(path, err)
 		}
 		return // always exit 0: never block Claude
+	}
+
+	// The exe is built as a GUI program so hooks and the tracker never open a
+	// console window; command-line modes attach to the caller's console instead.
+	if claudeBackfillMode || timesheetMode || installMode || uninstallMode {
+		attachParentConsole()
 	}
 
 	if claudeBackfillMode {
