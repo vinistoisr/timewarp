@@ -42,6 +42,7 @@ var (
 	uninstallMode          bool
 	dbpath                 string
 	claudeHookMode         bool
+	claudeBackfillMode     bool
 )
 
 // Prometheus metrics
@@ -133,6 +134,7 @@ func init() {
 	flag.BoolVar(&uninstallMode, "uninstall", false, "Remove the startup task")
 	flag.StringVar(&dbpath, "dbpath", "", "Directory for DB file(s) (default: same directory as the executable)")
 	flag.BoolVar(&claudeHookMode, "claudehook", false, "Record a Claude Code hook event from stdin (used by Claude Code hooks)")
+	flag.BoolVar(&claudeBackfillMode, "claudebackfill", false, "Import existing Claude Code transcripts into the DB")
 }
 
 // logHookError appends a hook failure to timewarp-hook.log in the DB folder.
@@ -452,6 +454,21 @@ func main() {
 			logHookError(path, err)
 		}
 		return // always exit 0: never block Claude
+	}
+
+	if claudeBackfillMode {
+		path := dbpath
+		if path == "" {
+			path = db.ExeDir()
+		}
+		root := filepath.Join(os.Getenv("USERPROFILE"), ".claude", "projects")
+		files, n, err := claude.Backfill(root, path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Backfill error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Backfill: %d transcripts read, %d events added.\n", files, n)
+		return
 	}
 
 	if installMode {
