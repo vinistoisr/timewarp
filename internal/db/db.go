@@ -11,6 +11,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/vinistoisr/timewarp/internal/claudewin"
 )
 
 const (
@@ -55,7 +57,7 @@ func Open(dbpath string) (*Tracker, error) {
 	}
 
 	dbFile := fmt.Sprintf("timewarp-%s.db", hostname)
-	dsn := fmt.Sprintf("file:%s/%s?_journal_mode=WAL&_busy_timeout=5000", dbpath, dbFile)
+	dsn := fmt.Sprintf("file:%s/%s?_pragma=busy_timeout(5000)", dbpath, dbFile)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -103,6 +105,8 @@ func initSchema(db *sql.DB) error {
 			ended_at        DATETIME NOT NULL,
 			duration_seconds REAL NOT NULL
 		)`,
+		claudeEventsTable,
+		claudeEventsIndex,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -135,10 +139,15 @@ func (t *Tracker) RecordFocus(hostname, username, processName, windowTitle strin
 		return
 	}
 
-	sameProcess := strings.EqualFold(t.pending.processName, processName)
+	sameWindow := strings.EqualFold(t.pending.processName, processName)
+	if sameWindow && claudewin.IsClaudeProcess(processName) {
+		// Separate Claude sessions share one terminal process; split on title,
+		// ignoring the status glyph that changes every second.
+		sameWindow = claudewin.NormalizeTitle(t.pending.windowTitle) == claudewin.NormalizeTitle(windowTitle)
+	}
 	gap := now.Sub(t.pending.lastSeen)
 
-	if sameProcess && gap <= bridgeThreshold {
+	if sameWindow && gap <= bridgeThreshold {
 		// Bridge the gap — extend the session, update title to latest
 		t.pending.lastSeen = now
 		t.pending.windowTitle = windowTitle

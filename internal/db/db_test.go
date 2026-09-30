@@ -32,6 +32,36 @@ func countRows(t *testing.T, d *sql.DB, table string) int {
 	return n
 }
 
+func TestClaudeWindowTitleChangeSplitsSession(t *testing.T) {
+	tr, _ := tempTracker(t)
+	defer tr.Close()
+	base := time.Now().Truncate(time.Second)
+	for i := 0; i < 15; i++ {
+		tr.RecordFocus("HOST", "user", "WindowsTerminal.exe", "✳ Session A", base.Add(time.Duration(i)*time.Second))
+	}
+	for i := 15; i < 30; i++ {
+		tr.RecordFocus("HOST", "user", "WindowsTerminal.exe", "⠏ Session B", base.Add(time.Duration(i)*time.Second))
+	}
+	tr.RecordFocus("HOST", "user", "chrome.exe", "Google", base.Add(31*time.Second))
+	if n := countRows(t, tr.db, "focus_events"); n != 2 {
+		t.Errorf("expected 2 sessions for 2 Claude titles, got %d", n)
+	}
+}
+
+func TestClaudeSpinnerChangeDoesNotSplit(t *testing.T) {
+	tr, _ := tempTracker(t)
+	defer tr.Close()
+	base := time.Now().Truncate(time.Second)
+	glyphs := []string{"✳", "⠏", "◐", "◑"}
+	for i := 0; i < 20; i++ {
+		tr.RecordFocus("HOST", "user", "WindowsTerminal.exe", glyphs[i%4]+" Session A", base.Add(time.Duration(i)*time.Second))
+	}
+	tr.RecordFocus("HOST", "user", "chrome.exe", "Google", base.Add(21*time.Second))
+	if n := countRows(t, tr.db, "focus_events"); n != 1 {
+		t.Errorf("spinner changes must not split, got %d rows", n)
+	}
+}
+
 func TestSessionStitching_BridgesGap(t *testing.T) {
 	tr, _ := tempTracker(t)
 	defer tr.Close()
