@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vinistoisr/timewarp/internal/db"
+	"github.com/vinistoisr/timewarp/internal/timesheet"
 )
 
 type jsonRPCRequest struct {
@@ -85,6 +86,17 @@ var tools = []toolDef{
 			"properties": {
 				"date_from": {"type": "string", "description": "Start date (ISO, e.g. 2026-03-02). Defaults to current week Monday."},
 				"date_to": {"type": "string", "description": "End date (ISO, e.g. 2026-03-08). Defaults to Sunday after date_from."}
+			}
+		}`),
+	},
+	{
+		Name:        "get_timesheet",
+		Description: "Hours per billing code per day for QuickBooks Time. Claude sessions are attributed to the project they worked on; parallel work on different projects counts for each; proposals are billed to Admin. Includes unassigned time for manual review.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"date_from": {"type": "string", "description": "Start date (ISO, e.g. 2026-09-01). Defaults to current week Monday."},
+				"date_to": {"type": "string", "description": "End date, inclusive (ISO). Defaults to today."}
 			}
 		}`),
 	},
@@ -184,6 +196,8 @@ func handleToolCall(dbpath string, req *jsonRPCRequest) {
 		result, err = callListTopApps(dbpath, params.Arguments)
 	case "get_daily_breakdown":
 		result, err = callGetDailyBreakdown(dbpath, params.Arguments)
+	case "get_timesheet":
+		result, err = callGetTimesheet(dbpath, params.Arguments)
 	default:
 		toolResult := map[string]interface{}{
 			"content": []map[string]string{
@@ -321,6 +335,35 @@ func callGetDailyBreakdown(dbpath string, args json.RawMessage) (json.RawMessage
 	}
 
 	return db.GetDailyBreakdown(dbpath, dateFrom, dateTo)
+}
+
+func callGetTimesheet(dbpath string, args json.RawMessage) (json.RawMessage, error) {
+	var a struct {
+		DateFrom string `json:"date_from"`
+		DateTo   string `json:"date_to"`
+	}
+	if len(args) > 0 {
+		json.Unmarshal(args, &a)
+	}
+	from := db.CurrentWeekMonday()
+	now := time.Now()
+	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	var err error
+	if a.DateFrom != "" {
+		if from, err = time.ParseInLocation("2006-01-02", a.DateFrom, time.Local); err != nil {
+			return nil, fmt.Errorf("invalid date_from: %w", err)
+		}
+	}
+	if a.DateTo != "" {
+		if to, err = time.ParseInLocation("2006-01-02", a.DateTo, time.Local); err != nil {
+			return nil, fmt.Errorf("invalid date_to: %w", err)
+		}
+	}
+	r, err := timesheet.Generate(dbpath, from, to.AddDate(0, 0, 1), timesheet.DefaultGenerateOptions())
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(r)
 }
 
 func writeResult(id json.RawMessage, result interface{}) {

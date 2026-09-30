@@ -25,6 +25,7 @@ import (
 	"github.com/vinistoisr/timewarp/internal/claude"
 	"github.com/vinistoisr/timewarp/internal/db"
 	"github.com/vinistoisr/timewarp/internal/mcp"
+	"github.com/vinistoisr/timewarp/internal/timesheet"
 	"github.com/vinistoisr/timewarp/internal/tray"
 	"github.com/vinistoisr/timewarp/internal/windowinfo"
 )
@@ -43,6 +44,9 @@ var (
 	dbpath                 string
 	claudeHookMode         bool
 	claudeBackfillMode     bool
+	timesheetMode          bool
+	tsFrom, tsTo, tsCSV    string
+	tsIdleMin              int
 )
 
 // Prometheus metrics
@@ -135,6 +139,49 @@ func init() {
 	flag.StringVar(&dbpath, "dbpath", "", "Directory for DB file(s) (default: same directory as the executable)")
 	flag.BoolVar(&claudeHookMode, "claudehook", false, "Record a Claude Code hook event from stdin (used by Claude Code hooks)")
 	flag.BoolVar(&claudeBackfillMode, "claudebackfill", false, "Import existing Claude Code transcripts into the DB")
+	flag.BoolVar(&timesheetMode, "timesheet", false, "Print hours per project per day")
+	flag.StringVar(&tsFrom, "from", "", "Timesheet start date YYYY-MM-DD (default: Monday this week)")
+	flag.StringVar(&tsTo, "to", "", "Timesheet end date YYYY-MM-DD, inclusive (default: today)")
+	flag.StringVar(&tsCSV, "csv", "", "Also write the timesheet to this CSV file")
+	flag.IntVar(&tsIdleMin, "idle", 10, "Timesheet: inactivity of this many minutes or more is away time")
+}
+
+func runTimesheet() error {
+	path := dbpath
+	if path == "" {
+		path = db.ExeDir()
+	}
+	now := time.Now()
+	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	from = from.AddDate(0, 0, -((int(from.Weekday()) + 6) % 7))
+	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	var err error
+	if tsFrom != "" {
+		if from, err = time.ParseInLocation("2006-01-02", tsFrom, time.Local); err != nil {
+			return fmt.Errorf("invalid -from: %w", err)
+		}
+	}
+	if tsTo != "" {
+		if to, err = time.ParseInLocation("2006-01-02", tsTo, time.Local); err != nil {
+			return fmt.Errorf("invalid -to: %w", err)
+		}
+	}
+	g := timesheet.DefaultGenerateOptions()
+	g.Idle = time.Duration(tsIdleMin) * time.Minute
+	r, err := timesheet.Generate(path, from, to.AddDate(0, 0, 1), g)
+	if err != nil {
+		return err
+	}
+	fmt.Print(timesheet.FormatTable(r))
+	if tsCSV != "" {
+		f, err := os.Create(tsCSV)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return timesheet.WriteCSV(f, r)
+	}
+	return nil
 }
 
 // logHookError appends a hook failure to timewarp-hook.log in the DB folder.
@@ -468,6 +515,14 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Backfill: %d transcripts read, %d events added.\n", files, n)
+		return
+	}
+
+	if timesheetMode {
+		if err := runTimesheet(); err != nil {
+			fmt.Fprintf(os.Stderr, "Timesheet error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

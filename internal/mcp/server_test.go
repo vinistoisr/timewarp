@@ -107,15 +107,15 @@ func TestToolsList(t *testing.T) {
 	}
 	json.Unmarshal(resp.Result, &result)
 
-	if len(result.Tools) != 4 {
-		t.Fatalf("expected 4 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 5 {
+		t.Fatalf("expected 5 tools, got %d", len(result.Tools))
 	}
 
 	names := map[string]bool{}
 	for _, tool := range result.Tools {
 		names[tool.Name] = true
 	}
-	for _, expected := range []string{"get_weekly_summary", "get_focus_time", "list_top_apps", "get_daily_breakdown"} {
+	for _, expected := range []string{"get_weekly_summary", "get_focus_time", "list_top_apps", "get_daily_breakdown", "get_timesheet"} {
 		if !names[expected] {
 			t.Errorf("missing tool: %s", expected)
 		}
@@ -213,4 +213,13 @@ func TestToolsCall_NilParams(t *testing.T) {
 	if resp.Error.Code != -32602 {
 		t.Errorf("expected -32602, got %d", resp.Error.Code)
 	}
+}
+
+func TestToolsIncludeGetTimesheet(t *testing.T) {
+	for _, tl := range tools {
+		if tl.Name == "get_timesheet" {
+			return
+		}
+	}
+	t.Error("get_timesheet tool not registered")
 }
