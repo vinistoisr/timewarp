@@ -18,3 +18,4 @@
 
 # Go workspace file
 go.work
+.superpowers/
