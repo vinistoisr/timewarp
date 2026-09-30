@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sys/windows"
 
+	"github.com/vinistoisr/timewarp/internal/claude"
 	"github.com/vinistoisr/timewarp/internal/db"
 	"github.com/vinistoisr/timewarp/internal/mcp"
 	"github.com/vinistoisr/timewarp/internal/tray"
@@ -40,6 +41,7 @@ var (
 	installMode            bool
 	uninstallMode          bool
 	dbpath                 string
+	claudeHookMode         bool
 )
 
 // Prometheus metrics
@@ -130,6 +132,17 @@ func init() {
 	flag.BoolVar(&installMode, "install", false, "Install as a startup task (runs at logon)")
 	flag.BoolVar(&uninstallMode, "uninstall", false, "Remove the startup task")
 	flag.StringVar(&dbpath, "dbpath", "", "Directory for DB file(s) (default: same directory as the executable)")
+	flag.BoolVar(&claudeHookMode, "claudehook", false, "Record a Claude Code hook event from stdin (used by Claude Code hooks)")
+}
+
+// logHookError appends a hook failure to timewarp-hook.log in the DB folder.
+func logHookError(dir string, err error) {
+	f, ferr := os.OpenFile(filepath.Join(dir, "timewarp-hook.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if ferr != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %v\n", time.Now().Format(time.RFC3339), err)
 }
 
 // setupMetrics initializes the Prometheus metrics and returns the registry
@@ -429,6 +442,17 @@ func doUninstall() error {
 
 func main() {
 	flag.Parse()
+
+	if claudeHookMode {
+		path := dbpath
+		if path == "" {
+			path = db.ExeDir()
+		}
+		if err := claude.RunHook(os.Stdin, path); err != nil {
+			logHookError(path, err)
+		}
+		return // always exit 0: never block Claude
+	}
 
 	if installMode {
 		if err := doInstall(); err != nil {
