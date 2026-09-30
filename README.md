@@ -37,11 +37,26 @@ Download `timewarp.exe` from the [latest release](https://github.com/vinistoisr/
 On the first launch, Timewarp walks you through setup automatically:
 
 1. **Choose a data folder** — A dialog explains your options and opens a folder picker. Pick a folder inside OneDrive if you use multiple computers (each PC saves its own file, no sync conflicts), or any local folder if you only use one machine.
-2. **Start at login** — Timewarp asks if you want it to run automatically when you log in. If you click Yes, a UAC prompt will appear (it needs admin rights to create the scheduled task). You can remove this later with `timewarp.exe -uninstall`.
-
-> **Don't have admin rights?** Skip the UAC prompt and instead create a shortcut to `timewarp.exe` in your Startup folder. Press `Win+R`, type `shell:startup`, and drag the shortcut there. It works the same way — Timewarp will start every time you log in.
+2. **Start at login** — Timewarp asks if you want it to run automatically when you log in. If you click Yes, it runs `timewarp.exe -install` for your account (see below). No administrator rights are needed.
 
 After setup, a small purple clock icon appears in your system tray — Timewarp is now tracking.
+
+### Install on a PC from the command line
+
+1. Build: `go build -o timewarp.exe .` (Go 1.24 or newer).
+2. Install for your account (no administrator rights needed):
+   `timewarp.exe -install -dbpath "C:\Users\<you>\OneDrive - <org>\Timewarp Db"`
+   This creates the scheduled task `Timewarp-<username>`, which starts Timewarp at logon and restarts it within 5 minutes if it stops, and adds the Claude Code hooks to `%USERPROFILE%\.claude\settings.json` (a backup is saved as `settings.json.timewarp-bak`).
+3. Import existing Claude Code sessions: `timewarp.exe -claudebackfill -dbpath "<same folder>"`
+4. Restart open Claude Code sessions so they load the hooks.
+
+To remove: `timewarp.exe -uninstall`. If an older install left a task named `Timewarp`, delete it from an administrator prompt with `schtasks /delete /tn Timewarp /f`.
+
+### Timesheets
+
+`timewarp.exe -timesheet -from 2026-09-01 -to 2026-09-30 -dbpath "<folder>" [-csv sept.csv]`
+
+Hours per billing code per day from every PC's database in the folder. Claude Code sessions are credited to the project they work on (from `S:\PROJECT\<year>\<number> ...` paths and project numbers in prompts). A project counts whenever you or Claude were working on it; work on the same project at the same time counts once, work on different projects at the same time counts for each. Proposal work is billed to Admin. Idle time of 10 minutes or more is excluded (`-idle` to change). Rows are rounded to 0.5 h. The same report is available to Claude through the `get_timesheet` MCP tool.
 
 ### Step 3: Connect to your AI app
 

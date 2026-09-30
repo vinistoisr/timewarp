@@ -47,13 +47,6 @@ func hiddenCmd(name string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// HasScheduledTask checks if the "Timewarp" scheduled task exists.
-func HasScheduledTask() bool {
-	cmd := hiddenCmd("schtasks", "/query", "/tn", "Timewarp")
-	err := cmd.Run()
-	return err == nil
-}
-
 // RunOnboarding shows a welcome dialog and folder picker if this is a first run.
 // Returns the chosen DB path, or empty string if the user cancelled.
 func RunOnboarding() string {
@@ -79,42 +72,25 @@ func RunOnboarding() string {
 	return strings.TrimSpace(string(out))
 }
 
-// OfferScheduledTask asks the user if they want Timewarp to start automatically.
-// If yes, it creates the scheduled task via an elevated process and returns true.
+// OfferScheduledTask asks the user if they want Timewarp to start
+// automatically and, if so, runs "timewarp.exe -install" as the current user.
 func OfferScheduledTask(exePath, dbpath string) bool {
 	ret := messageBox("Start Automatically?",
 		"Would you like Timewarp to start automatically when you log in?\r\n\r\n"+
-			"This will ask for administrator permission to create a scheduled task.\r\n\r\n"+
-			"You can remove this later from the command line with:\r\n"+
+			"This creates a scheduled task for your account and records Claude Code sessions. "+
+			"No administrator rights are needed.\r\n\r\n"+
+			"You can remove it later with:\r\n"+
 			"  timewarp.exe -uninstall",
 		mbYesNo|mbIconQuestion)
 	if ret != idYes {
 		return false
 	}
-
-	// Launch an elevated process with just -install (not the whole app)
-	args := fmt.Sprintf(`-install -dbpath "%s"`, dbpath)
-	if err := elevatedRun(exePath, args); err != nil {
-		messageBox("Timewarp", fmt.Sprintf("Failed to create scheduled task:\n%v", err), mbOK|mbIconInfo)
+	out, err := hiddenCmd(exePath, "-install", "-dbpath", dbpath).CombinedOutput()
+	if err != nil {
+		messageBox("Timewarp", fmt.Sprintf("Failed to set up automatic start:\n%v\n%s", err, out), mbOK|mbIconInfo)
 		return false
 	}
 	return true
-}
-
-// elevatedRun launches the given exe with args via UAC "runas".
-func elevatedRun(exe, args string) error {
-	verbPtr, _ := syscall.UTF16PtrFromString("runas")
-	exePtr, _ := syscall.UTF16PtrFromString(exe)
-	argsPtr, _ := syscall.UTF16PtrFromString(args)
-
-	shell32 := syscall.NewLazyDLL("shell32.dll")
-	procShellExecuteW := shell32.NewProc("ShellExecuteW")
-
-	ret, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verbPtr)), uintptr(unsafe.Pointer(exePtr)), uintptr(unsafe.Pointer(argsPtr)), 0, syscall.SW_HIDE)
-	if ret <= 32 {
-		return fmt.Errorf("ShellExecute returned %d", ret)
-	}
-	return nil
 }
 
 // claudeConfigPath returns the path to Claude Desktop's config file, or empty if not found.

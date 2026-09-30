@@ -7,15 +7,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf16"
-	"unsafe"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -24,6 +21,7 @@ import (
 
 	"github.com/vinistoisr/timewarp/internal/claude"
 	"github.com/vinistoisr/timewarp/internal/db"
+	"github.com/vinistoisr/timewarp/internal/install"
 	"github.com/vinistoisr/timewarp/internal/mcp"
 	"github.com/vinistoisr/timewarp/internal/timesheet"
 	"github.com/vinistoisr/timewarp/internal/tray"
@@ -301,35 +299,6 @@ func runExporter(ctx context.Context) {
 	}
 }
 
-// elevateAndRun re-launches the current exe with admin privileges via UAC prompt.
-func elevateAndRun() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("could not determine executable path: %w", err)
-	}
-
-	// Quote args containing spaces (e.g. -dbpath values) so the elevated
-	// process parses the same flags we received.
-	quoted := make([]string, 0, len(os.Args)-1)
-	for _, a := range os.Args[1:] {
-		if strings.ContainsAny(a, " \t") && !strings.HasPrefix(a, `"`) {
-			a = `"` + a + `"`
-		}
-		quoted = append(quoted, a)
-	}
-	args := strings.Join(quoted, " ")
-
-	verbPtr, _ := windows.UTF16PtrFromString("runas")
-	exePtr, _ := windows.UTF16PtrFromString(exe)
-	argsPtr, _ := windows.UTF16PtrFromString(args)
-
-	err = windows.ShellExecute(0, verbPtr, exePtr, argsPtr, nil, windows.SW_NORMAL)
-	if err != nil {
-		return fmt.Errorf("UAC elevation failed: %w", err)
-	}
-	return nil
-}
-
 // acquireSingleInstanceLock creates a named session-local mutex so only one
 // tracker instance runs per login session. Returns false if another instance
 // already holds it. The handle is intentionally never closed — it must live
@@ -347,145 +316,45 @@ func acquireSingleInstanceLock() bool {
 	return true
 }
 
-// isElevated checks if the current process has admin privileges.
-func isElevated() bool {
-	token := windows.GetCurrentProcessToken()
-	elevated := false
-	var elevation struct{ TokenIsElevated uint32 }
-	var size uint32
-	err := windows.GetTokenInformation(token, windows.TokenElevation, (*byte)(unsafe.Pointer(&elevation)), uint32(unsafe.Sizeof(elevation)), &size)
-	if err == nil && elevation.TokenIsElevated != 0 {
-		elevated = true
-	}
-	return elevated
-}
-
-// taskXML defines the startup task. Laptop-safe (no battery restrictions, no
-// execution time limit) and self-healing: both triggers repeat every 5
-// minutes, which combined with IgnoreNew is a no-op while Timewarp is running
-// but relaunches it if it has stopped for any reason. The daily trigger
-// covers sessions where the logon trigger never fired (e.g. task installed
-// or repaired mid-session).
-const taskXML = `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>Timewarp activity tracker. Starts at logon and restarts within 5 minutes if it stops.</Description>
-  </RegistrationInfo>
-  <Principals>
-    <Principal id="Author">
-      <UserId>%[1]s</UserId>
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>3</Count>
-    </RestartOnFailure>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-  </Settings>
-  <Triggers>
-    <LogonTrigger>
-      <Repetition>
-        <Interval>PT5M</Interval>
-        <StopAtDurationEnd>false</StopAtDurationEnd>
-      </Repetition>
-      <Enabled>true</Enabled>
-      <UserId>%[1]s</UserId>
-      <Delay>PT30S</Delay>
-    </LogonTrigger>
-    <CalendarTrigger>
-      <Repetition>
-        <Interval>PT5M</Interval>
-        <StopAtDurationEnd>false</StopAtDurationEnd>
-      </Repetition>
-      <StartBoundary>2020-01-01T00:05:00</StartBoundary>
-      <Enabled>true</Enabled>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
-  </Triggers>
-  <Actions Context="Author">
-    <Exec>
-      <Command>%[2]s</Command>%[3]s
-    </Exec>
-  </Actions>
-</Task>
-`
-
-func xmlEscape(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
-}
-
-// utf16leBytes encodes s as UTF-16LE with a BOM. schtasks /create /xml
-// rejects UTF-8 task files with "unable to switch the encoding".
-func utf16leBytes(s string) []byte {
-	u := utf16.Encode([]rune(s))
-	b := make([]byte, 0, 2+len(u)*2)
-	b = append(b, 0xFF, 0xFE)
-	for _, r := range u {
-		b = append(b, byte(r), byte(r>>8))
-	}
-	return b
-}
-
 func doInstall() error {
-	if !isElevated() {
-		fmt.Println("Requesting administrator privileges...")
-		return elevateAndRun()
-	}
-
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("could not determine executable path: %w", err)
 	}
-
-	user := os.Getenv("USERDOMAIN") + `\` + os.Getenv("USERNAME")
-	args := ""
-	if dbpath != "" {
-		args = "\n      <Arguments>-dbpath \"" + xmlEscape(dbpath) + "\"</Arguments>"
+	user, err := install.CurrentUser()
+	if err != nil {
+		return fmt.Errorf("could not determine current user: %w", err)
 	}
-	xml := fmt.Sprintf(taskXML, xmlEscape(user), xmlEscape(exePath), args)
-
-	tmp := filepath.Join(os.TempDir(), "timewarp-task.xml")
-	if err := os.WriteFile(tmp, utf16leBytes(xml), 0o600); err != nil {
-		return fmt.Errorf("could not write task definition: %w", err)
+	path := dbpath
+	if path == "" {
+		path = db.ExeDir()
 	}
-	defer os.Remove(tmp)
-
-	cmd := exec.Command("schtasks", "/create", "/tn", "Timewarp", "/xml", tmp, "/f")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("schtasks create failed: %w", err)
+	if err := install.InstallTask(user, exePath, path); err != nil {
+		return err
 	}
-	fmt.Println("Timewarp installed as a startup task.")
+	fmt.Printf("Startup task %s installed for %s.\n", install.TaskName(user), user)
+	if err := install.InstallHooks(exePath, path); err != nil {
+		return fmt.Errorf("Claude Code hooks: %w", err)
+	}
+	fmt.Println("Claude Code hooks added to", install.SettingsPath())
+	if install.LegacyTaskPresent() {
+		fmt.Println(`An old "Timewarp" task from a previous install still exists. To remove it, run in an administrator prompt: schtasks /delete /tn Timewarp /f`)
+	}
 	return nil
 }
 
 func doUninstall() error {
-	if !isElevated() {
-		fmt.Println("Requesting administrator privileges...")
-		return elevateAndRun()
+	user, err := install.CurrentUser()
+	if err != nil {
+		return err
 	}
-
-	cmd := exec.Command("schtasks", "/delete", "/tn", "Timewarp", "/f")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("schtasks delete failed: %w", err)
+	if err := install.UninstallTask(user); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 	}
-	fmt.Println("Timewarp startup task removed.")
+	if err := install.UninstallHooks(); err != nil {
+		return fmt.Errorf("Claude Code hooks: %w", err)
+	}
+	fmt.Println("Timewarp startup task and Claude Code hooks removed.")
 	return nil
 }
 
@@ -575,7 +444,7 @@ func main() {
 	}
 
 	// Onboarding: offer to create scheduled task
-	if !silentMode && !tray.HasScheduledTask() {
+	if user, err := install.CurrentUser(); err == nil && !silentMode && !install.HasTask(user) {
 		exePath, _ := os.Executable()
 		p := dbpath
 		if p == "" {
