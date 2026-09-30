@@ -50,10 +50,14 @@ Session title: the last `ai-title` line in the transcript, read from the tail of
 | session_title | TEXT | may be empty early in a session |
 | event | TEXT | `prompt`, `tool`, `stop`, `end` |
 | ref_kind | TEXT | `project`, `proposal`, `mention`, `none` |
-| ref_number | TEXT | `NN-NNN` or NULL |
-| ref_source | TEXT | `path`, `prompt`, `cwd` or NULL |
+| ref_number | TEXT | `NN-NNN`, or empty string when none |
+| ref_source | TEXT | `path`, `prompt`, `cwd`, or empty string |
 
-One row per distinct number found in the event. An event with no number writes one row with `ref_kind = none` (it still marks the session as active).
+One row per distinct number found in the event. An event with no number writes one row with `ref_kind = none` (it still marks the session as active). A unique index on (session_id, ts, event, ref_number) makes re-inserts no-ops; empty strings are used instead of NULL so the index applies.
+
+### Tracker change
+
+The tracker stitches consecutive ticks of the same process into one focus event and keeps only the latest title. Two Claude sessions in tabs of one Windows Terminal window would merge. For Claude processes (WindowsTerminal.exe, claude.exe, Code.exe) the tracker also flushes the pending focus event when the title, with its status glyph removed, changes.
 
 ### Number detection
 
@@ -76,7 +80,7 @@ Paths are searched in `tool_input` (all string values, recursively, including Ba
 
 ### Inputs
 
-All `timewarp-*.db` files in the DB folder (every PC), tables `focus_events`, `inactivity_periods`, `claude_events`.
+All `timewarp-*.db` files in the DB folder (every PC), excluding backups (any name containing `.bak`), tables `focus_events`, `inactivity_periods`, `claude_events`. Folder roots for name lookup are flags with defaults `-projectroot S:\PROJECT` and `-proposalroot S:\Proposals`. Path detection in the hook matches `\PROJECT\<year>\` and `\Proposals\` without relying on the drive letter.
 
 ### Rules
 
