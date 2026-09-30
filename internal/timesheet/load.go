@@ -96,8 +96,9 @@ func loadOne(conn *sql.DB, lo, hi string, from, to time.Time, d *Data) error {
 			rows.Close()
 			return err
 		}
-		f.Start, _ = ParseDBTime(s)
-		f.End, _ = ParseDBTime(e)
+		if f.Interval, err = parseSpan(s, e); err != nil {
+			continue // a zero start would bill from year 1
+		}
 		if overlaps(f.Interval, from, to) {
 			d.Focus = append(d.Focus, f)
 		}
@@ -116,8 +117,9 @@ func loadOne(conn *sql.DB, lo, hi string, from, to time.Time, d *Data) error {
 			rows.Close()
 			return err
 		}
-		h.Start, _ = ParseDBTime(s)
-		h.End, _ = ParseDBTime(e)
+		if h.Interval, err = parseSpan(s, e); err != nil {
+			continue
+		}
 		if overlaps(h.Interval, from, to) {
 			d.Idle = append(d.Idle, h)
 		}
@@ -129,8 +131,12 @@ func loadOne(conn *sql.DB, lo, hi string, from, to time.Time, d *Data) error {
 	if hasTable == 0 {
 		return nil
 	}
+	// Whole sessions that were active in the range, so a project number set
+	// before the range still decides the billing code inside it.
 	rows, err = conn.Query(`SELECT ts, hostname, username, session_id, session_title, event, ref_kind, ref_number, ref_source
-		FROM claude_events WHERE ts >= ? AND ts < ? ORDER BY ts`, lo, hi)
+		FROM claude_events WHERE session_id IN
+			(SELECT DISTINCT session_id FROM claude_events WHERE ts >= ? AND ts < ?)
+		ORDER BY ts, id`, lo, hi)
 	if err != nil {
 		return err
 	}
@@ -142,8 +148,22 @@ func loadOne(conn *sql.DB, lo, hi string, from, to time.Time, d *Data) error {
 			&ev.Event, &ev.RefKind, &ev.RefNumber, &ev.RefSource); err != nil {
 			return err
 		}
-		ev.TS, _ = ParseDBTime(ts)
+		if ev.TS, err = ParseDBTime(ts); err != nil {
+			continue
+		}
 		d.Events = append(d.Events, ev)
 	}
 	return rows.Err()
+}
+
+func parseSpan(s, e any) (Interval, error) {
+	start, err := ParseDBTime(s)
+	if err != nil {
+		return Interval{}, err
+	}
+	end, err := ParseDBTime(e)
+	if err != nil {
+		return Interval{}, err
+	}
+	return Interval{start, end}, nil
 }

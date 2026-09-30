@@ -41,6 +41,7 @@ type session struct {
 	titles   map[string]bool
 	title    string // latest non-empty normalised title
 	events   []db.ClaudeEvent
+	times    []time.Time // event timestamps, sorted, for binary search
 	busy     []Interval
 	focus    []Interval
 	points   []point
@@ -95,6 +96,10 @@ func buildSessions(evs []db.ClaudeEvent, f Folders, o Options) []*session {
 	}
 	for _, s := range list {
 		sort.SliceStable(s.events, func(a, b int) bool { return s.events[a].TS.Before(s.events[b].TS) })
+		s.times = make([]time.Time, len(s.events))
+		for i, e := range s.events {
+			s.times[i] = e.TS
+		}
 		for _, e := range s.events {
 			if t := claudewin.NormalizeTitle(e.SessionTitle); t != "" {
 				s.titles[t] = true
@@ -212,14 +217,8 @@ func assignClaudeFocus(fc Focus, piece Interval, sessions []*session, o Options)
 		if !s.titles[title] {
 			continue
 		}
-		for _, e := range s.events {
-			dist := e.TS.Sub(mid)
-			if dist < 0 {
-				dist = -dist
-			}
-			if bestDist < 0 || dist < bestDist {
-				match, bestDist = s, dist
-			}
+		if dist, ok := s.nearest(mid); ok && (bestDist < 0 || dist < bestDist) {
+			match, bestDist = s, dist
 		}
 	}
 	if match != nil {
@@ -246,17 +245,44 @@ func assignClaudeFocus(fc Focus, piece Interval, sessions []*session, o Options)
 	return out
 }
 
+// latestAtOrBefore returns the session's last event time not after t.
+func (s *session) latestAtOrBefore(t time.Time) (time.Time, bool) {
+	i := sort.Search(len(s.times), func(i int) bool { return s.times[i].After(t) })
+	if i == 0 {
+		return time.Time{}, false
+	}
+	return s.times[i-1], true
+}
+
+// nearest returns the distance from t to the session's closest event.
+func (s *session) nearest(t time.Time) (time.Duration, bool) {
+	i := sort.Search(len(s.times), func(i int) bool { return !s.times[i].Before(t) })
+	best := time.Duration(-1)
+	for _, j := range []int{i - 1, i} {
+		if j < 0 || j >= len(s.times) {
+			continue
+		}
+		d := s.times[j].Sub(t)
+		if d < 0 {
+			d = -d
+		}
+		if best < 0 || d < best {
+			best = d
+		}
+	}
+	return best, best >= 0
+}
+
 func recentSession(sessions []*session, at time.Time, window time.Duration) *session {
 	var best *session
 	var bestTS time.Time
 	for _, s := range sessions {
-		for _, e := range s.events {
-			if e.TS.After(at) || at.Sub(e.TS) > window {
-				continue
-			}
-			if best == nil || e.TS.After(bestTS) {
-				best, bestTS = s, e.TS
-			}
+		ts, ok := s.latestAtOrBefore(at)
+		if !ok || at.Sub(ts) > window {
+			continue
+		}
+		if best == nil || ts.After(bestTS) {
+			best, bestTS = s, ts
 		}
 	}
 	return best

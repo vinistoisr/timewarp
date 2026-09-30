@@ -21,6 +21,8 @@ type transcriptLine struct {
 	Cwd       string `json:"cwd"`
 	AITitle   string `json:"aiTitle"`
 	IsMeta    bool   `json:"isMeta"`
+	// Compaction summaries are type "user" but written by Claude Code, not typed.
+	IsCompactSummary bool `json:"isCompactSummary"`
 	Message   *struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -48,6 +50,19 @@ func blocks(raw json.RawMessage) (text string, list []contentBlock) {
 		}
 	}
 	return strings.Join(parts, "\n"), list
+}
+
+// automatedPrompt reports user-typed lines that Claude Code generated itself
+// (background task notices, reminders, local command output). The hook never
+// sees these as prompts, so the backfill must not take project numbers from them.
+func automatedPrompt(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, p := range []string{"<task-notification>", "<system-reminder>", "<local-command-"} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // EventsFromTranscript rebuilds the events the hook would have written from a
@@ -87,10 +102,14 @@ func EventsFromTranscript(r io.Reader, host, user string) ([]db.ClaudeEvent, err
 					text, list := blocks(content)
 					switch l.Type {
 					case "user":
-						if text != "" && !l.IsMeta {
+						if text != "" && !l.IsMeta && !l.IsCompactSummary {
 							stop()
 							base.Event = "prompt"
-							evs = append(evs, eventsFor(ExtractRefs(text, nil, l.Cwd), base)...)
+							refText := text
+							if automatedPrompt(text) {
+								refText = "" // the turn counts as busy, but its text names no project
+							}
+							evs = append(evs, eventsFor(ExtractRefs(refText, nil, l.Cwd), base)...)
 							inTurn = true
 						}
 					case "assistant":

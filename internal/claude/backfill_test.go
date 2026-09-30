@@ -37,6 +37,31 @@ func TestEventsFromTranscript(t *testing.T) {
 	}
 }
 
+func TestEventsFromTranscript_SkipsSyntheticPrompts(t *testing.T) {
+	body := `{"type":"user","sessionId":"s1","timestamp":"2026-09-30T20:00:00Z","isCompactSummary":true,"message":{"content":"This session is being continued. Files: S:\\PROJECT\\2026\\26-087 GI\\a.docx"}}
+{"type":"user","sessionId":"s1","timestamp":"2026-09-30T20:01:00Z","message":{"content":"<task-notification>\nsee S:\\PROJECT\\2026\\26-139 Pender\\x.pdf\n</task-notification>"}}
+{"type":"user","sessionId":"s1","timestamp":"2026-09-30T20:02:00Z","message":{"content":"work on project 26-104"}}
+`
+	evs, err := EventsFromTranscript(strings.NewReader(body), "H", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.RefNumber == "26-087" || e.RefNumber == "26-139" {
+			t.Errorf("synthetic prompt produced ref %s at %s", e.RefNumber, e.TS)
+		}
+	}
+	found := false
+	for _, e := range evs {
+		if e.RefNumber == "26-104" && e.Event == "prompt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("real prompt ref missing")
+	}
+}
+
 func TestEventsFromTranscript_LongLine(t *testing.T) {
 	big := strings.Repeat("x", 2<<20)
 	body := `{"type":"user","sessionId":"s1","timestamp":"2026-09-30T20:00:00Z","message":{"content":"` + big + `"}}` + "\n" +

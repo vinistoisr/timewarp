@@ -45,6 +45,8 @@ var (
 	timesheetMode          bool
 	tsFrom, tsTo, tsCSV    string
 	tsIdleMin              int
+	projectRoot            string
+	proposalRoot           string
 )
 
 // Prometheus metrics
@@ -142,6 +144,8 @@ func init() {
 	flag.StringVar(&tsTo, "to", "", "Timesheet end date YYYY-MM-DD, inclusive (default: today)")
 	flag.StringVar(&tsCSV, "csv", "", "Also write the timesheet to this CSV file")
 	flag.IntVar(&tsIdleMin, "idle", 10, "Timesheet: inactivity of this many minutes or more is away time")
+	flag.StringVar(&projectRoot, "projectroot", timesheet.DefaultProjectRoot, "Timesheet: folder holding <year>\\<number> project folders")
+	flag.StringVar(&proposalRoot, "proposalroot", timesheet.DefaultProposalRoot, "Timesheet: folder holding proposal folders")
 }
 
 func runTimesheet() error {
@@ -360,6 +364,7 @@ func doUninstall() error {
 
 func main() {
 	flag.Parse()
+	timesheet.ProjectRoot, timesheet.ProposalRoot = projectRoot, proposalRoot
 
 	if claudeHookMode {
 		path := dbpath

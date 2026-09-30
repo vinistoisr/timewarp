@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sampleReport() Report {
@@ -21,6 +22,31 @@ func TestFormatTable(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("table missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestGenerate_WarnsWhenRootsUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	g := DefaultGenerateOptions()
+	g.ProjectRoot, g.ProposalRoot = `Z:\no\projects`, `Z:\no\proposals`
+	r, err := Generate(dir, t0, t0.Add(24*time.Hour), g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want one per unreadable root", r.Warnings)
+	}
+	if out := FormatTable(r); !strings.Contains(out, `Z:\no\projects`) {
+		t.Errorf("table does not show the warning:\n%s", out)
+	}
+}
+
+func TestDefaultGenerateOptions_UsesConfiguredRoots(t *testing.T) {
+	oldP, oldQ := ProjectRoot, ProposalRoot
+	defer func() { ProjectRoot, ProposalRoot = oldP, oldQ }()
+	ProjectRoot, ProposalRoot = `P:\x`, `Q:\y`
+	if g := DefaultGenerateOptions(); g.ProjectRoot != `P:\x` || g.ProposalRoot != `Q:\y` {
+		t.Errorf("roots = %q %q", g.ProjectRoot, g.ProposalRoot)
 	}
 }
 

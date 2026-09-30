@@ -11,6 +11,12 @@ import (
 func FormatTable(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Timesheet %s to %s\n\n", r.From, r.To)
+	for _, w := range r.Warnings {
+		fmt.Fprintf(&b, "WARNING: %s\n", w)
+	}
+	if len(r.Warnings) > 0 {
+		b.WriteString("\n")
+	}
 	fmt.Fprintf(&b, "%-10s  %-10s  %6s  %5s  %-40s  %s\n", "date", "code", "raw", "hours", "name", "notes")
 	for _, row := range r.Rows {
 		fmt.Fprintf(&b, "%-10s  %-10s  %6.2f  %5.1f  %-40.40s  %s\n", row.Date, row.Code, row.RawHours, row.Hours, row.Name, strings.Join(row.Notes, "; "))

@@ -1,6 +1,7 @@
 package timesheet
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,6 +23,58 @@ func TestParseDBTime(t *testing.T) {
 	}
 	if _, err := ParseDBTime(time.Now()); err != nil {
 		t.Errorf("time.Time value: %v", err)
+	}
+}
+
+func TestLoad_IncludesEarlierEventsOfActiveSessions(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := db.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2026, 9, 10, 7, 0, 0, 0, time.UTC)
+	tr.InsertClaudeEvents([]db.ClaudeEvent{
+		{TS: from.AddDate(0, 0, -3), Hostname: "H", Username: "u", SessionID: "long", Event: "prompt", RefKind: "project", RefNumber: "26-104"},
+		{TS: from.Add(time.Hour), Hostname: "H", Username: "u", SessionID: "long", Event: "tool", RefKind: "none"},
+		{TS: from.AddDate(0, 0, -3), Hostname: "H", Username: "u", SessionID: "old", Event: "prompt", RefKind: "project", RefNumber: "26-087"},
+	})
+	tr.Close()
+	d, err := Load(dir, from, from.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions []string
+	for _, e := range d.Events {
+		sessions = append(sessions, e.SessionID+" "+e.RefNumber)
+	}
+	if len(d.Events) != 2 || d.Events[0].RefNumber != "26-104" {
+		t.Errorf("events = %v, want both rows of the active session and none of the old one", sessions)
+	}
+}
+
+func TestLoad_DropsUnparseableTimes(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := db.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.Close()
+	matches, _ := filepath.Glob(filepath.Join(dir, "timewarp-*.db"))
+	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(matches[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Exec(`INSERT INTO focus_events (hostname, username, process_name, window_title, started_at, ended_at, duration_seconds)
+		VALUES ('H','u','EXCEL.EXE','26-104 x','2026-09-10 garbage','2026-09-10 12:00:00.0 +0000 UTC', 60)`)
+	conn.Exec(`INSERT INTO inactivity_periods (hostname, username, started_at, ended_at, duration_seconds)
+		VALUES ('H','u','2026-09-10 garbage','2026-09-10 12:00:00.0 +0000 UTC', 60)`)
+	conn.Close()
+	d, err := Load(dir, time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Focus) != 0 || len(d.Idle) != 0 {
+		t.Errorf("rows with unparseable times must be dropped: focus=%d idle=%d", len(d.Focus), len(d.Idle))
 	}
 }
 

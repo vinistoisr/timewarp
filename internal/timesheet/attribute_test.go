@@ -154,6 +154,24 @@ func TestAttribute_SessionWithoutNumberIsUnassigned(t *testing.T) {
 	}
 }
 
+func TestAttribute_GenericFocusScalesWithEvents(t *testing.T) {
+	// A month of activity: 20 sessions x 10,000 events, plus 10,000 minutes of
+	// "Claude" desktop focus that must be matched to a recent session.
+	var d Data
+	for s := 0; s < 20; s++ {
+		id := string(rune('a' + s))
+		for i := 0; i < 10000; i++ {
+			d.Events = append(d.Events, ev(i*4+s%4, id, "T"+id, "tool", "none", ""))
+		}
+	}
+	d.Focus = []Focus{focus(0, 10000, "claude.exe", "Claude", "")}
+	start := time.Now()
+	Attribute(d, testFolders, DefaultOptions())
+	if el := time.Since(start); el > 3*time.Second {
+		t.Errorf("Attribute took %v for 200k events, want under 3s", el)
+	}
+}
+
 func mustAttr(t *testing.T, d Data) []Assignment {
 	t.Helper()
 	asg, _ := Attribute(d, testFolders, DefaultOptions())

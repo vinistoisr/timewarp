@@ -32,6 +32,7 @@ type Report struct {
 	Unassigned []Row  `json:"unassigned"`
 	Other      []Row  `json:"other"`
 	Days       []Day  `json:"days"`
+	Warnings   []string `json:"warnings,omitempty"`
 }
 
 // RoundHours: nearest 0.5 h; 10 min to under 0.5 h rounds up to 0.5; under 10 min is 0.
