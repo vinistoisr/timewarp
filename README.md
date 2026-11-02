@@ -46,9 +46,13 @@ After setup, a small purple clock icon appears in your system tray — Timewarp 
 1. Build: `go build -ldflags "-H=windowsgui" -o timewarp.exe .` (Go 1.24 or newer). The `-H=windowsgui` flag matters: without it every Claude Code hook call opens a console window.
 2. Install for your account (no administrator rights needed):
    `timewarp.exe -install -dbpath "C:\Users\<you>\OneDrive - <org>\Timewarp Db"`
-   This creates the scheduled task `Timewarp-<username>`, which starts Timewarp at logon and restarts it within 5 minutes if it stops, and adds the Claude Code hooks to `%USERPROFILE%\.claude\settings.json` (a backup is saved as `settings.json.timewarp-bak`).
+   This creates the scheduled task `Timewarp-<username>`, which starts Timewarp at logon and restarts it within 5 minutes if it stops, adds the Claude Code hooks to `%USERPROFILE%\.claude\settings.json` (a backup is saved as `settings.json.timewarp-bak`), and registers the `timewarp` MCP server with Claude Code at user scope (`claude mcp add -s user`). If `claude` is not on PATH, the command to run later is printed instead.
 3. Import existing Claude Code sessions: `timewarp.exe -claudebackfill -dbpath "<same folder>"`
-4. Restart open Claude Code sessions so they load the hooks.
+4. Restart open Claude Code sessions so they load the hooks and the MCP server.
+
+The tracker starts within 5 minutes of install (or at next logon). In Task Manager you will see one `timewarp.exe` tracker plus one `timewarp.exe -mcp` per open Claude Code session; each MCP process exits when its session closes.
+
+To use more than one PC, install on each with the same OneDrive `-dbpath`. Each PC writes its own `timewarp-<PC>.db` and the timesheet reads them all. One PC is enough.
 
 To remove: `timewarp.exe -uninstall`. If an older install left a task named `Timewarp`, delete it from an administrator prompt with `schtasks /delete /tn Timewarp /f`.
 

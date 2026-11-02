@@ -356,6 +356,11 @@ func doInstall() error {
 		return fmt.Errorf("Claude Code hooks: %w", err)
 	}
 	fmt.Println("Claude Code hooks added to", install.SettingsPath())
+	if err := install.InstallMCP(exePath, path); err != nil {
+		fmt.Println("MCP server not registered:", err)
+	} else {
+		fmt.Println("Timewarp MCP server registered with Claude Code (user scope).")
+	}
 	if install.LegacyTaskPresent() {
 		fmt.Println(`An old "Timewarp" task from a previous install still exists. To remove it, run in an administrator prompt: schtasks /delete /tn Timewarp /f`)
 	}
@@ -373,7 +378,8 @@ func doUninstall() error {
 	if err := install.UninstallHooks(); err != nil {
 		return fmt.Errorf("Claude Code hooks: %w", err)
 	}
-	fmt.Println("Timewarp startup task and Claude Code hooks removed.")
+	install.UninstallMCP()
+	fmt.Println("Timewarp startup task, Claude Code hooks and MCP server removed.")
 	return nil
 }
 
