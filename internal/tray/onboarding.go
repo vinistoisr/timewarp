@@ -31,6 +31,23 @@ func messageBox(title, text string, flags uintptr) int {
 	return int(ret)
 }
 
+// WelcomeText is the first-run notice: exactly what Timewarp records and where it goes.
+const WelcomeText = "Timewarp helps you fill in your timesheet.\r\n\r\n" +
+	"While you work, it saves:\r\n" +
+	"• the title of the window you are using, like \"26-104 Report.docx - Word\"\r\n" +
+	"• any project numbers in those titles\r\n" +
+	"• the names of your Claude Code sessions and the project numbers in them\r\n\r\n" +
+	"It does not save keystrokes, screenshots or what is inside your files.\r\n\r\n" +
+	"Everything stays in one file on your computer, in a folder you pick next. " +
+	"Timewarp does not send it to anyone. If you pick a OneDrive folder, " +
+	"OneDrive backs it up like any other file you keep there.\r\n\r\n" +
+	"When you run /timesheet, Claude reads this file to suggest your hours.\r\n\r\n" +
+	"To pause or quit, right-click the purple clock icon near the Windows clock."
+
+// AutoStartText asks whether to register the per-user startup task.
+const AutoStartText = "Start Timewarp each time you sign in to Windows?\r\n\r\n" +
+	"No administrator rights are needed. To remove it later, run: timewarp.exe -uninstall"
+
 // HasExistingDB checks if any timewarp-*.db files exist in the given directory.
 func HasExistingDB(dir string) bool {
 	matches, err := filepath.Glob(filepath.Join(dir, "timewarp-*.db"))
@@ -50,14 +67,7 @@ func hiddenCmd(name string, args ...string) *exec.Cmd {
 // RunOnboarding shows a welcome dialog and folder picker if this is a first run.
 // Returns the chosen DB path, or empty string if the user cancelled.
 func RunOnboarding() string {
-	messageBox("Welcome to Timewarp",
-		"Timewarp tracks your active window to help you fill out timesheets.\r\n\r\n"+
-			"First, choose a folder to store your data.\r\n\r\n"+
-			"Tip: Pick a folder inside OneDrive if you use multiple computers — "+
-			"each PC saves its own file, so there are no sync conflicts and "+
-			"you can see all your activity in one place.\r\n\r\n"+
-			"Click OK to choose a folder.",
-		mbOK|mbIconInfo)
+	messageBox("Welcome to Timewarp", WelcomeText, mbOK|mbIconInfo)
 
 	cmd := hiddenCmd("powershell", "-NoProfile", "-Command",
 		`Add-Type -AssemblyName System.Windows.Forms; `+
@@ -75,13 +85,7 @@ func RunOnboarding() string {
 // OfferScheduledTask asks the user if they want Timewarp to start
 // automatically and, if so, runs "timewarp.exe -install" as the current user.
 func OfferScheduledTask(exePath, dbpath string) bool {
-	ret := messageBox("Start Automatically?",
-		"Would you like Timewarp to start automatically when you log in?\r\n\r\n"+
-			"This creates a scheduled task for your account and records Claude Code sessions. "+
-			"No administrator rights are needed.\r\n\r\n"+
-			"You can remove it later with:\r\n"+
-			"  timewarp.exe -uninstall",
-		mbYesNo|mbIconQuestion)
+	ret := messageBox("Start Automatically?", AutoStartText, mbYesNo|mbIconQuestion)
 	if ret != idYes {
 		return false
 	}
